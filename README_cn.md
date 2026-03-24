@@ -17,7 +17,7 @@
 
 ### 前置条件
 
-1. 已有可用的 Anthropic API Key（或已通过 `claude` 命令登录）
+1. 已有可用的 Anthropic API Key（或已通过 `claude` 命令登录, 或使用 [cc-switch](https://github.com/farion1231/cc-switch)）
 2. 确认 `claude` 命令可在终端直接执行：
    ```bash
    claude --version
@@ -40,6 +40,7 @@ claude
 ```
 
 按提示完成认证。
+可以使用 [cc-switch](https://github.com/farion1231/cc-switch)中转
 
 ### 2. 安装 Python 依赖
 
