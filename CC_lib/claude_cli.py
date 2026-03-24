@@ -117,7 +117,7 @@ class ClaudeChat:
     - stdout: 接收事件流（JSON lines）
     """
 
-    def __init__(self, cwd=None, permissions_path=None):
+    def __init__(self, cwd=None, permissions_path=None, effort=None):
         self.cwd = cwd
         self.permissions = load_permissions(permissions_path)
         self.proc = None
@@ -126,6 +126,7 @@ class ClaudeChat:
         self._reader_thread = None
         self._alive = False
         self._model = None
+        self._effort = effort
         self._total_cost = 0.0
         self._total_turns = 0
         self._context_tokens = 0
@@ -150,6 +151,8 @@ class ClaudeChat:
         cmd += _build_permission_args(self.permissions)
         if self._model:
             cmd += ["--model", self._model]
+        if self._effort:
+            cmd += ["--effort", self._effort]
 
         self.proc = subprocess.Popen(
             cmd,

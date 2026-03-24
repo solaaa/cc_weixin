@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+*.env
+
+# WeChat token (contains auth credentials)
+.weixin-token.json
+.current_user
+
+# Logs
+LOG/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temp files
+*.tmp
+/日本旅游计划
+*.bat
+/data
+/.claude
+CODE_SYS_PROMPT.md
+CLAUDE.md

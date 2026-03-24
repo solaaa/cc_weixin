@@ -32,10 +32,12 @@ class WeixinClaudeBridge:
         self._client = ILinkClient(
             token_file=self.config.get("token_file", ".weixin-token.json"),
         )
-        claude_cwd = self.config.get("claude", {}).get("cwd") or _PROJECT_DIR
+        claude_cfg = self.config.get("claude", {})
+        claude_cwd = claude_cfg.get("cwd") or _PROJECT_DIR
         self._chat = ClaudeChat(
             cwd=claude_cwd,
-            permissions_path=self.config.get("claude", {}).get("permissions_path"),
+            permissions_path=claude_cfg.get("permissions_path"),
+            effort=claude_cfg.get("effort"),
         )
         # 用户 ID → 是否在等待回答 AskUserQuestion
         self._waiting_answer = {}

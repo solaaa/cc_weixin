@@ -4,7 +4,7 @@
   "forward_events": {
     "_comment": "控制哪些 Claude 事件类型回传微信。true=发送, false=不发送。result 始终发送。",
     "thinking": false,
-    "text": true,
+    "text": false,
     "tool_use": true,
     "tool_result": false,
     "result": true
@@ -23,10 +23,12 @@
 
   "claude": {
     "cwd": null,
-    "permissions_path": null
+    "permissions_path": null,
+    "effort": "medium"
   },
 
   "_claude_cwd_note": "cwd 为 null 时默认使用项目目录（weixin_lib 所在目录）",
+  "_claude_effort_note": "effort 控制 Claude 思考深度，可选: low / medium / high / max",
 
   "token_file": ".weixin-token.json"
 }
