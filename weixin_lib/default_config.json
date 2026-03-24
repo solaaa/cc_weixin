@@ -1,0 +1,32 @@
+{
+  "_comment": "微信-Claude 桥接服务配置文件。复制到项目根目录命名为 weixin_config.json 即可自定义。",
+
+  "forward_events": {
+    "_comment": "控制哪些 Claude 事件类型回传微信。true=发送, false=不发送。result 始终发送。",
+    "thinking": false,
+    "text": true,
+    "tool_use": true,
+    "tool_result": false,
+    "result": true
+  },
+
+  "message_prefix": {
+    "_comment": "各事件类型在微信中的前缀标识",
+    "thinking": "💭 思考中：",
+    "text": "",
+    "tool_use": "🔧 调用工具：",
+    "tool_result": "📋 工具结果：",
+    "result": ""
+  },
+
+  "max_message_length": 2000,
+
+  "claude": {
+    "cwd": null,
+    "permissions_path": null
+  },
+
+  "_claude_cwd_note": "cwd 为 null 时默认使用项目目录（weixin_lib 所在目录）",
+
+  "token_file": ".weixin-token.json"
+}

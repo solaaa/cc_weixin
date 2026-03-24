@@ -1,0 +1,32 @@
+{
+  "_comment": "Claude Code 工具权限配置。设为 true 允许，false 禁止。skip_all_permissions=true 时跳过所有确认。",
+
+  "skip_all_permissions": true,
+
+  "auto_compact": {
+    "enabled": true,
+    "threshold_tokens": 100000
+  },
+
+  "tools": {
+    "Task":             true,
+    "TaskOutput":       true,
+    "TaskStop":         true,
+    "TodoWrite":        true,
+    "Bash":             true,
+    "Glob":             true,
+    "Grep":             true,
+    "Read":             true,
+    "Edit":             true,
+    "Write":            true,
+    "NotebookEdit":     true,
+    "WebFetch":         true,
+    "WebSearch":        true,
+    "AskUserQuestion":  true,
+    "Skill":            true,
+    "EnterPlanMode":    true,
+    "ExitPlanMode":     true,
+    "EnterAgentMode":   true,
+    "ExitAgentMode":    true
+  }
+}
