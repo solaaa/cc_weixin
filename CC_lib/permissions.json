@@ -5,7 +5,7 @@
 
   "auto_compact": {
     "enabled": true,
-    "threshold_tokens": 100000
+    "threshold_tokens": 90000
   },
 
   "tools": {

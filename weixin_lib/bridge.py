@@ -16,6 +16,7 @@ from CC_lib.claude_cli import ClaudeChat
 from weixin_lib.ilink_api import ILinkClient, extract_text
 from weixin_lib.config import load_config, should_forward, get_prefix, get_max_length
 from weixin_lib.scheduler import Scheduler
+from weixin_lib.chat_store import ChatStore
 
 log = logging.getLogger("bridge")
 
@@ -49,6 +50,8 @@ class WeixinClaudeBridge:
         self._scheduler = Scheduler(tasks_file=_TASKS_FILE)
         # 消息队列：统一调度用户消息和到期任务，避免并发冲突
         self._msg_queue = Queue()
+        # 聊天记录存储
+        self._chat_store = ChatStore()
 
     def login(self, force=False):
         """登录微信。如果已有有效 token 且非强制登录，直接复用。"""
@@ -131,6 +134,7 @@ class WeixinClaudeBridge:
         # 流式处理 Claude 响应
         log.info("   🤔 Claude 处理中...")
         pending_texts = []
+        result_text = ""
 
         for event in self._chat.stream(text):
             event_type = event.get("type", "")
@@ -161,9 +165,13 @@ class WeixinClaudeBridge:
 
             # result 事件标志本轮结束
             if event_type == "result":
+                result_text = event.get("result", "")
                 break
 
         self._flush_pending(pending_texts, from_user, context_token)
+
+        # 记录对话到历史
+        self._record_conversation(text, result_text)
 
     def _handle_ask_answer(self, from_user, text, context_token):
         """处理用户对 AskUserQuestion 的回答。"""
@@ -213,6 +221,20 @@ class WeixinClaudeBridge:
                 break
 
         self._flush_pending(pending_texts, from_user, context_token)
+
+    def _record_conversation(self, user_text, agent_reply):
+        """将有价值的对话记录到历史存储。跳过过短或无意义的消息。"""
+        # 跳过过短的纯寒暄
+        trivial = {"好", "好的", "嗯", "ok", "谢谢", "谢", "哦", "行", "收到", "嗯嗯", "对"}
+        if user_text.strip().lower() in trivial:
+            return
+        try:
+            if user_text.strip():
+                self._chat_store.add_message("user", user_text)
+            if agent_reply and agent_reply.strip():
+                self._chat_store.add_message("assistant", agent_reply)
+        except Exception as e:
+            log.warning(f"记录对话失败: {e}")
 
     def _extract_forward_text(self, event):
         """从事件中提取需要转发的文本。返回 None 表示不转发。"""
