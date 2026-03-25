@@ -196,7 +196,7 @@ class Scheduler:
 # ── 供 schedule_cli.py 使用的任务管理函数 ────────────────
 
 def add_task(tasks_file, task_type, message, target_user,
-             trigger_time=None, cron_expr=None):
+             trigger_time=None, cron_expr=None, agent_process=False):
     """添加一个新任务，返回任务 ID。"""
     tasks = []
     if os.path.exists(tasks_file):
@@ -213,6 +213,7 @@ def add_task(tasks_file, task_type, message, target_user,
         "target_user": target_user,
         "created_at": now.isoformat(),
         "status": "pending",
+        "agent_process": agent_process,
     }
 
     if task_type == "once":

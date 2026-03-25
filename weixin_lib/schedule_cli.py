@@ -38,6 +38,7 @@ def _get_target_user():
 
 def cmd_add(args):
     os.makedirs(_DATA_DIR, exist_ok=True)
+    agent_process = getattr(args, 'agent', False) or False
     if args.cron:
         task_id = add_task(
             _TASKS_FILE,
@@ -45,8 +46,10 @@ def cmd_add(args):
             message=args.message,
             target_user=_get_target_user(),
             cron_expr=args.cron,
+            agent_process=agent_process,
         )
-        print(f"✅ 周期任务已创建 (ID: {task_id}, cron: {args.cron})")
+        mode = "Agent处理" if agent_process else "直接发送"
+        print(f"✅ 周期任务已创建 (ID: {task_id}, cron: {args.cron}, 模式: {mode})")
     elif args.time:
         task_id = add_task(
             _TASKS_FILE,
@@ -54,8 +57,10 @@ def cmd_add(args):
             message=args.message,
             target_user=_get_target_user(),
             trigger_time=args.time,
+            agent_process=agent_process,
         )
-        print(f"✅ 定时任务已创建 (ID: {task_id}, 触发时间: {args.time})")
+        mode = "Agent处理" if agent_process else "直接发送"
+        print(f"✅ 定时任务已创建 (ID: {task_id}, 触发时间: {args.time}, 模式: {mode})")
     else:
         print("❌ 需要 --time 或 --cron 参数")
         sys.exit(1)
@@ -73,7 +78,8 @@ def cmd_list(args):
             time_info = t.get("trigger_time", "?")
         else:
             time_info = f"cron: {t.get('cron_expr', '?')}"
-        print(f"  [{t['id']}] {time_info} → {t['message']}")
+        mode = " [Agent]" if t.get("agent_process") else ""
+        print(f"  [{t['id']}] {time_info} → {t['message']}{mode}")
 
 
 def cmd_delete(args):
@@ -93,6 +99,7 @@ def main():
     p_add.add_argument("--time", help="触发时间 (如 '15:00' 或 '2025-05-03 15:00')")
     p_add.add_argument("--cron", help="cron 表达式 (如 '0 9 * * 1-5')")
     p_add.add_argument("--message", required=True, help="提醒消息内容")
+    p_add.add_argument("--agent", action="store_true", help="任务到期时交给 Agent 处理后再发送")
 
     # list
     sub.add_parser("list", help="列出待执行任务")

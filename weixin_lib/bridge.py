@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import time
+from queue import Queue, Empty
+from threading import Thread
 
 from CC_lib.claude_cli import ClaudeChat
 from weixin_lib.ilink_api import ILinkClient, extract_text
@@ -45,6 +47,8 @@ class WeixinClaudeBridge:
         self._user_context = {}
         # 定时任务调度器
         self._scheduler = Scheduler(tasks_file=_TASKS_FILE)
+        # 消息队列：统一调度用户消息和到期任务，避免并发冲突
+        self._msg_queue = Queue()
 
     def login(self, force=False):
         """登录微信。如果已有有效 token 且非强制登录，直接复用。"""
@@ -55,9 +59,13 @@ class WeixinClaudeBridge:
         return self._client.login()
 
     def run(self):
-        """主循环：长轮询收消息 → Claude 处理 → 回传微信。"""
+        """主循环：长轮询收消息 → 入队 → worker 线程处理。"""
         self._scheduler.start(callback=self._on_task_due)
         log.info("🚀 桥接服务已启动（Ctrl+C 退出）...")
+
+        # 启动 worker 线程处理队列中的消息
+        self._worker_thread = Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
 
         retry_delay = 3  # 初始重试间隔
         max_delay = 60   # 最大重试间隔
@@ -69,7 +77,7 @@ class WeixinClaudeBridge:
                 for msg in msgs:
                     if msg.get("message_type") != 1:
                         continue
-                    self._handle_message(msg)
+                    self._msg_queue.put(("user_msg", msg))
             except KeyboardInterrupt:
                 log.info("👋 服务已停止")
                 break
@@ -81,6 +89,22 @@ class WeixinClaudeBridge:
                 log.warning(f"⚠️  轮询出错: {err_msg}，{retry_delay}s 后重试...")
                 time.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, max_delay)
+
+    def _worker_loop(self):
+        """Worker 线程：串行处理队列中的用户消息和到期任务。"""
+        while True:
+            try:
+                item = self._msg_queue.get(timeout=1)
+            except Empty:
+                continue
+            try:
+                msg_type, payload = item
+                if msg_type == "user_msg":
+                    self._handle_message(payload)
+                elif msg_type == "task_due":
+                    self._handle_task_due(payload)
+            except Exception as e:
+                log.error(f"Worker 处理出错: {e}", exc_info=True)
 
     def _handle_message(self, msg):
         """处理一条微信用户消息。"""
@@ -265,15 +289,46 @@ class WeixinClaudeBridge:
             log.error(f"   ❌ 发送失败: {e}", exc_info=True)
 
     def _on_task_due(self, task):
-        """调度器回调：定时任务到期，发送微信消息。"""
+        """调度器回调：定时任务到期，入队处理。"""
+        self._msg_queue.put(("task_due", task))
+
+    def _handle_task_due(self, task):
+        """处理到期任务：直接发送或交给 Agent 处理。"""
         target = task.get("target_user", "")
         message = task.get("message", "")
         if not target or not message:
             return
         context_token = self._user_context.get(target, "")
         task_type = task.get("type", "once")
-        prefix = "⏰ 定时提醒：" if task_type == "once" else "⏰ 周期提醒："
-        self._send_to_weixin(target, f"{prefix}{message}", context_token)
+
+        if task.get("agent_process"):
+            # 交给 Agent 处理后再发送
+            log.info(f"⏰ 到期任务 [{task.get('id')}] 交给 Agent 处理: {message[:50]}")
+            prompt = f"[定时任务触发] 以下是用户预设的定时任务内容，请根据内容执行并回复用户：\n{message}"
+            pending_texts = []
+            for event in self._chat.stream(prompt):
+                forwarded = self._extract_forward_text(event)
+                if forwarded:
+                    pending_texts.append(forwarded)
+                if event.get("type") == "result":
+                    break
+            if pending_texts:
+                prefix = "⏰ " if task_type == "once" else "⏰ "
+                full_text = prefix + "\n\n".join(pending_texts)
+            else:
+                full_text = f"⏰ 定时任务已触发，但 Agent 未返回内容: {message}"
+            self._flush_text(full_text, target, context_token)
+        else:
+            # 直接发送
+            prefix = "⏰ 定时提醒：" if task_type == "once" else "⏰ 周期提醒："
+            self._send_to_weixin(target, f"{prefix}{message}", context_token)
+
+    def _flush_text(self, text, to_user, context_token):
+        """将文本分片发送到微信。"""
+        max_len = get_max_length(self.config)
+        chunks = _split_text(text, max_len)
+        for chunk in chunks:
+            self._send_to_weixin(to_user, chunk, context_token)
 
     @staticmethod
     def _write_current_user(user_id):
