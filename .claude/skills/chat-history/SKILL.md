@@ -53,6 +53,11 @@ python weixin_lib/chat_history_cli.py dates
 python weixin_lib/chat_history_cli.py messages-by-date --date 2025-05-03
 ```
 
+### List dates with unsummarized messages
+```bash
+python weixin_lib/chat_history_cli.py unsummarized
+```
+
 ## Creating Summaries
 
 When a day's conversations are done (or when explicitly triggered), create a summary to make future searches efficient:
@@ -67,5 +72,6 @@ The summary text should be a concise description of the key topics discussed tha
 
 - Never dump all history at once — always use the two-step process
 - When searching, try broad keywords first; narrow down if too many results
-- Summaries may not exist for recent dates — in that case, use `messages-by-date` as a fallback
+- Summaries are auto-generated periodically (configurable in config). For recent dates without summaries yet, use `messages-by-date` as a fallback
 - If the user's question is ambiguous about timing, check `dates` first to see what's available
+- Use `unsummarized` to check if there are dates needing manual summary creation

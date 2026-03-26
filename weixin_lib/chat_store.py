@@ -206,3 +206,16 @@ class ChatStore:
             return [dict(r) for r in rows]
         finally:
             conn.close()
+
+    def get_unsummarized_dates(self):
+        """获取所有有未关联摘要消息的日期及消息数量。"""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT date_str, COUNT(*) as count FROM messages "
+                "WHERE summary_id IS NULL "
+                "GROUP BY date_str ORDER BY date_str",
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()

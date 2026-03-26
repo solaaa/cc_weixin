@@ -209,7 +209,34 @@ class ClaudeChat:
             "message": {"role": "user", "content": text},
         })
 
-    def stream(self, message, _raw=False):
+    def _send_multimodal_message(self, text, images):
+        """
+        发送包含图片的多模态消息到 Claude。
+
+        images: [(file_path, media_type), ...] 列表
+        """
+        import base64 as b64mod
+
+        content = []
+        for img_path, media_type in images:
+            with open(img_path, "rb") as f:
+                img_data = b64mod.b64encode(f.read()).decode("ascii")
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": img_data,
+                },
+            })
+        content.append({"type": "text", "text": text or "请描述这张图片"})
+
+        self._write({
+            "type": "user",
+            "message": {"role": "user", "content": content},
+        })
+
+    def stream(self, message, _raw=False, images=None):
         """
         发送消息，以生成器 yield 每个事件，直到收到 result 事件。
 
@@ -219,6 +246,7 @@ class ClaudeChat:
 
         参数：
             _raw: 为 True 时跳过斜杠命令拦截（内部使用）。
+            images: [(file_path, media_type), ...] 多模态图片列表。
         """
         # ── 惰性自动压缩（上轮标记的）──
         if not _raw and self._needs_compact:
@@ -255,7 +283,10 @@ class ClaudeChat:
             except Empty:
                 break
 
-        self._send_user_message(message)
+        if images:
+            self._send_multimodal_message(message, images)
+        else:
+            self._send_user_message(message)
 
         # 跟踪已 yield 的 AskUserQuestion，避免重复（流式中同一 tool_use 可能多次出现）
         yielded_ask_ids = set()

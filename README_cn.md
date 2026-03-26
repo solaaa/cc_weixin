@@ -14,6 +14,8 @@
 | **Claude Code CLI** | 最新 | `npm install -g @anthropic-ai/claude-code` |
 | **Python** | 3.10+ | https://www.python.org 或 conda |
 | **qrcode**（Python 库，可选） | — | `pip install qrcode` |
+| **cryptography** | — | `pip install cryptography` |
+| **Pillow** | — | `pip install Pillow` |
 
 ### 前置条件
 
@@ -45,10 +47,10 @@ claude
 ### 2. 安装 Python 依赖
 
 ```bash
-pip install qrcode
+pip install qrcode cryptography Pillow
 ```
 
-> `qrcode` 是可选的，用于在终端显示二维码。没有它也能用，会直接打印 URL。
+> `qrcode` 是可选的，用于在终端显示二维码。`cryptography` 和 `Pillow` 用于图片接收功能（CDN 下载解密和图片压缩）。
 
 ### 3. 验证环境
 
@@ -121,6 +123,13 @@ cp weixin_lib/default_config.json weixin_config.json
   // 单条微信消息最大字符数（超长自动分片）
   "max_message_length": 2000,
 
+  // 图片处理配置
+  "image": {
+    "max_long_edge": 2560,     // 长边像素阈值，超过则询问压缩
+                                // 参考: 720p=1280, 1K=1920, 2K=2560, 2.7K=3440, 4K=3840
+    "compress_quality": 85      // JPEG 压缩质量 (1-100)
+  },
+
   // Claude Code 配置
   "claude": {
     "cwd": null,              // Claude 工作目录，null 默认为项目目录
@@ -131,6 +140,22 @@ cp weixin_lib/default_config.json weixin_config.json
   "token_file": ".weixin-token.json"
 }
 ```
+
+---
+
+## 图片理解
+
+支持用户发送图片给 AI 进行分析和理解：
+
+- 用户在微信发送图片后，桥接服务自动从微信 CDN 下载并 AES-128-ECB 解密
+- 图片以 base64 多模态格式传给 Claude，Claude 可以描述、分析图片内容
+- 支持图片 + 文字混合消息（如发图片同时附带"这是什么"）
+- 高分辨率图片（长边超过阈值，默认 2560px）会询问用户是否压缩：
+  - 回复 1：压缩到阈值尺寸后处理
+  - 回复 2：使用原图处理
+  - 回复 3：取消处理
+
+阈值和压缩质量可在配置文件中调整（`image.max_long_edge` 和 `image.compress_quality`）。
 
 ---
 

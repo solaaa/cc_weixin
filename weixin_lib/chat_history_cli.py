@@ -77,6 +77,17 @@ def cmd_dates(args):
         print(f"  {d['date_str']}  ({d['count']} 条消息)")
 
 
+def cmd_unsummarized(args):
+    results = _store().get_unsummarized_dates()
+    if not results:
+        print("所有消息都已生成摘要。")
+        return
+    total = sum(d["count"] for d in results)
+    print(f"以下日期有未生成摘要的消息（共 {total} 条）：\n")
+    for d in results:
+        print(f"  {d['date_str']}  ({d['count']} 条未摘要)")
+
+
 def cmd_messages_by_date(args):
     results = _store().get_messages_by_date(args.date)
     if not results:
@@ -120,6 +131,9 @@ def main():
     p_dates = sub.add_parser("dates", help="列出有记录的日期")
     p_dates.add_argument("--limit", type=int, default=30, help="最大天数")
 
+    # unsummarized
+    sub.add_parser("unsummarized", help="列出有未生成摘要消息的日期")
+
     # messages-by-date
     p_mbd = sub.add_parser("messages-by-date", help="按日期查看消息")
     p_mbd.add_argument("--date", required=True, help="日期 (YYYY-MM-DD)")
@@ -139,6 +153,7 @@ def main():
         "search-summaries": cmd_search_summaries,
         "get-messages": cmd_get_messages,
         "dates": cmd_dates,
+        "unsummarized": cmd_unsummarized,
         "messages-by-date": cmd_messages_by_date,
         "create-summary": cmd_create_summary,
     }

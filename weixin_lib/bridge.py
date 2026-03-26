@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, date
 from queue import Queue, Empty
-from threading import Thread
+from threading import Thread, Event
 
 from CC_lib.claude_cli import ClaudeChat
-from weixin_lib.ilink_api import ILinkClient, extract_text
+from weixin_lib.ilink_api import ILinkClient, extract_text, extract_images, get_image_info, compress_image
 from weixin_lib.config import load_config, should_forward, get_prefix, get_max_length
 from weixin_lib.scheduler import Scheduler
 from weixin_lib.chat_store import ChatStore
@@ -44,6 +45,8 @@ class WeixinClaudeBridge:
         )
         # 用户 ID → 是否在等待回答 AskUserQuestion
         self._waiting_answer = {}
+        # 用户 ID → 是否在等待图片压缩确认
+        self._waiting_image_confirm = {}
         # 用户 ID → context_token 映射（用于调度器回调发送消息）
         self._user_context = {}
         # 定时任务调度器
@@ -52,6 +55,10 @@ class WeixinClaudeBridge:
         self._msg_queue = Queue()
         # 聊天记录存储
         self._chat_store = ChatStore()
+        # 自动摘要配置
+        self._summary_config = self.config.get("summary_schedule", {})
+        self._last_summary_date = None
+        self._summary_stop = Event()
 
     def login(self, force=False):
         """登录微信。如果已有有效 token 且非强制登录，直接复用。"""
@@ -69,6 +76,11 @@ class WeixinClaudeBridge:
         # 启动 worker 线程处理队列中的消息
         self._worker_thread = Thread(target=self._worker_loop, daemon=True)
         self._worker_thread.start()
+
+        # 启动自动摘要线程
+        if self._summary_config.get("interval", "off") != "off":
+            self._summary_thread = Thread(target=self._summary_loop, daemon=True)
+            self._summary_thread.start()
 
         retry_delay = 3  # 初始重试间隔
         max_delay = 60   # 最大重试间隔
@@ -106,6 +118,8 @@ class WeixinClaudeBridge:
                     self._handle_message(payload)
                 elif msg_type == "task_due":
                     self._handle_task_due(payload)
+                elif msg_type == "auto_summary":
+                    self._run_auto_summary()
             except Exception as e:
                 log.error(f"Worker 处理出错: {e}", exc_info=True)
 
@@ -128,15 +142,110 @@ class WeixinClaudeBridge:
             self._handle_ask_answer(from_user, text, context_token)
             return
 
+        # 如果用户正在等待图片压缩确认
+        if self._waiting_image_confirm.get(from_user):
+            self._handle_image_confirm(from_user, text, context_token)
+            return
+
+        # 检测并下载图片
+        image_items = extract_images(msg)
+        downloaded_images = []
+        if image_items:
+            log.info(f"   📷 检测到 {len(image_items)} 张图片，正在下载...")
+            for img_item in image_items:
+                path, media_type = self._client.download_image(img_item)
+                if path:
+                    downloaded_images.append((path, media_type))
+
+        # 如果有图片，检测尺寸判断是否需要压缩
+        if downloaded_images:
+            img_cfg = self.config.get("image", {})
+            # 720p=1280, 1K=1920, 2K=2560, 2.7K=3440, 4K=3840
+            max_long_edge = img_cfg.get("max_long_edge", 2560)
+            needs_compress = False
+
+            for img_path, _ in downloaded_images:
+                info = get_image_info(img_path)
+                if info:
+                    w, h, fsize = info
+                    long_edge = max(w, h)
+                    if long_edge > max_long_edge:
+                        needs_compress = True
+                        # 计算压缩后的目标尺寸
+                        ratio = max_long_edge / long_edge
+                        target_w, target_h = int(w * ratio), int(h * ratio)
+                        confirm_text = (
+                            f"📷 图片尺寸较大 ({w}x{h}, {fsize/1024:.0f}KB)\n"
+                            f"超过阈值 {max_long_edge}px，建议压缩到 {target_w}x{target_h}\n\n"
+                            f"回复 1: 压缩后处理\n"
+                            f"回复 2: 使用原图处理\n"
+                            f"回复 3: 取消处理"
+                        )
+                        self._send_to_weixin(from_user, confirm_text, context_token)
+                        self._waiting_image_confirm[from_user] = {
+                            "context_token": context_token,
+                            "images": downloaded_images,
+                            "text": text,
+                            "max_long_edge": max_long_edge,
+                            "quality": img_cfg.get("compress_quality", 85),
+                        }
+                        log.info(f"   📷 图片 {w}x{h} 超过阈值 {max_long_edge}px，等待用户确认...")
+                        return
+
         # 发送 typing 状态
         self._client.send_typing(from_user, context_token)
+
+        # 发送消息给 Claude
+        self._send_to_claude(from_user, text, context_token, downloaded_images)
+
+    def _handle_image_confirm(self, from_user, text, context_token):
+        """处理用户对图片压缩的确认回复。"""
+        waiting = self._waiting_image_confirm.pop(from_user)
+        images = waiting["images"]
+        original_text = waiting["text"]
+        choice = text.strip()
+
+        if choice == "3":
+            # 取消处理
+            self._send_to_weixin(from_user, "已取消图片处理。", context_token)
+            self._cleanup_images(images)
+            return
+
+        if choice == "1":
+            # 压缩
+            max_edge = waiting["max_long_edge"]
+            quality = waiting["quality"]
+            compressed_images = []
+            for img_path, media_type in images:
+                new_path = compress_image(img_path, max_edge, quality)
+                if new_path and new_path != img_path:
+                    compressed_images.append((new_path, "image/jpeg"))
+                    # 删除原图
+                    try:
+                        os.remove(img_path)
+                    except OSError:
+                        pass
+                else:
+                    compressed_images.append((img_path, media_type))
+            images = compressed_images
+
+        # choice == "2" 或其他 → 使用原图
+
+        self._client.send_typing(from_user, context_token)
+        self._send_to_claude(from_user, original_text, context_token, images)
+
+    def _send_to_claude(self, from_user, text, context_token, images):
+        """将消息（可能含图片）发送给 Claude 并处理响应。"""
+        # 如果有图片但没有文本，提供默认提示
+        if images and text == "[图片]":
+            text = "用户发送了图片，请分析这张图片的内容"
 
         # 流式处理 Claude 响应
         log.info("   🤔 Claude 处理中...")
         pending_texts = []
         result_text = ""
 
-        for event in self._chat.stream(text):
+        for event in self._chat.stream(text, images=images if images else None):
             event_type = event.get("type", "")
 
             # AskUserQuestion: 发问题给微信用户，等待回答
@@ -172,6 +281,9 @@ class WeixinClaudeBridge:
 
         # 记录对话到历史
         self._record_conversation(text, result_text)
+
+        # 清理临时图片文件
+        self._cleanup_images(images)
 
     def _handle_ask_answer(self, from_user, text, context_token):
         """处理用户对 AskUserQuestion 的回答。"""
@@ -310,6 +422,14 @@ class WeixinClaudeBridge:
         except Exception as e:
             log.error(f"   ❌ 发送失败: {e}", exc_info=True)
 
+    def _cleanup_images(self, images):
+        """清理临时图片文件。"""
+        for img_path, _ in images:
+            try:
+                os.remove(img_path)
+            except OSError:
+                pass
+
     def _on_task_due(self, task):
         """调度器回调：定时任务到期，入队处理。"""
         self._msg_queue.put(("task_due", task))
@@ -352,6 +472,73 @@ class WeixinClaudeBridge:
         for chunk in chunks:
             self._send_to_weixin(to_user, chunk, context_token)
 
+    # ── 自动摘要 ──────────────────────────────────────────
+
+    def _summary_loop(self):
+        """后台线程：定时检查是否需要生成摘要。"""
+        interval = self._summary_config.get("interval", "off")
+        target_hour = self._summary_config.get("hour", 23)
+
+        while not self._summary_stop.is_set():
+            now = datetime.now()
+            should_run = False
+
+            if interval == "daily":
+                # 每天在 target_hour 时执行一次
+                if now.hour == target_hour and self._last_summary_date != now.date():
+                    should_run = True
+            elif interval == "weekly":
+                # 每周一在 target_hour 时执行一次
+                if now.weekday() == 0 and now.hour == target_hour and self._last_summary_date != now.date():
+                    should_run = True
+
+            if should_run:
+                self._last_summary_date = now.date()
+                self._msg_queue.put(("auto_summary", None))
+
+            self._summary_stop.wait(3600)  # 每 60 分钟检查一次
+
+    def _run_auto_summary(self):
+        """执行自动摘要：获取未摘要的日期，让 Agent 为每个日期生成摘要。"""
+        unsummarized = self._chat_store.get_unsummarized_dates()
+        if not unsummarized:
+            log.info("⏰ 自动摘要：所有消息已有摘要，跳过")
+            return
+
+        log.info(f"⏰ 自动摘要：发现 {len(unsummarized)} 个日期需要生成摘要")
+
+        for date_info in unsummarized:
+            date_str = date_info["date_str"]
+            messages = self._chat_store.get_unsummarized_messages(date_str)
+            if not messages:
+                continue
+
+            # 构造消息文本供 Agent 总结
+            msg_lines = []
+            for m in messages:
+                role = "用户" if m["role"] == "user" else "Agent"
+                msg_lines.append(f"{role}: {m['content'][:300]}")
+            conversation_text = "\n".join(msg_lines)
+
+            prompt = (
+                f"[自动摘要任务] 请为以下 {date_str} 的对话生成一条简洁摘要（200字以内），"
+                f"用分号分隔关键主题。只输出摘要文本，不要其他内容。\n\n{conversation_text}"
+            )
+
+            # 让 Agent 生成摘要
+            summary_text = ""
+            for event in self._chat.stream(prompt):
+                if event.get("type") == "result":
+                    summary_text = event.get("result", "").strip()
+                    break
+
+            if summary_text:
+                message_ids = [m["id"] for m in messages]
+                self._chat_store.create_summary(date_str, summary_text, message_ids)
+                log.info(f"⏰ 自动摘要：{date_str} 已生成摘要（{len(message_ids)} 条消息）")
+            else:
+                log.warning(f"⏰ 自动摘要：{date_str} Agent 未返回摘要内容")
+
     @staticmethod
     def _write_current_user(user_id):
         """写入当前用户 ID，供 schedule_cli.py 读取。"""
@@ -364,6 +551,7 @@ class WeixinClaudeBridge:
 
     def stop(self):
         """停止服务。"""
+        self._summary_stop.set()
         self._scheduler.stop()
         self._chat.stop()
 

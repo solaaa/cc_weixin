@@ -21,6 +21,13 @@
 
   "max_message_length": 2000,
 
+  "image": {
+    "_comment": "图片处理配置。max_long_edge 为长边像素数阈值，超过则询问用户是否压缩。",
+    "_resolution_reference": "720p=1280, 1K=1920, 2K=2560, 2.7K=3440, 4K=3840",
+    "max_long_edge": 2560,
+    "compress_quality": 85
+  },
+
   "claude": {
     "cwd": null,
     "permissions_path": null,
@@ -29,6 +36,12 @@
 
   "_claude_cwd_note": "cwd 为 null 时默认使用项目目录（weixin_lib 所在目录）",
   "_claude_effort_note": "effort 控制 Claude 思考深度，可选: low / medium / high / max",
+
+  "summary_schedule": {
+    "_comment": "聊天记录自动摘要配置。interval 可选: off / daily / weekly，hour 为每天执行的小时（0-23）",
+    "interval": "daily",
+    "hour": 4
+  },
 
   "token_file": ".weixin-token.json"
 }

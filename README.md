@@ -14,6 +14,8 @@ A bridge service that connects WeChat to Claude Code. When a WeChat message is r
 | **Claude Code CLI** | Latest | `npm install -g @anthropic-ai/claude-code` |
 | **Python** | 3.10+ | https://www.python.org or conda |
 | **qrcode** (Python, optional) | — | `pip install qrcode` |
+| **cryptography** | — | `pip install cryptography` |
+| **Pillow** | — | `pip install Pillow` |
 
 ### Prerequisites
 
@@ -44,10 +46,10 @@ Follow the prompts to authenticate.
 ### 2. Install Python Dependencies
 
 ```bash
-pip install qrcode
+pip install qrcode cryptography Pillow
 ```
 
-> `qrcode` is optional — it renders a QR code in the terminal. Without it, a URL will be printed instead.
+> `qrcode` is optional — it renders a QR code in the terminal. `cryptography` and `Pillow` are required for image support (CDN download/decryption and compression).
 
 ### 3. Verify Setup
 
@@ -118,6 +120,13 @@ cp weixin_lib/default_config.json weixin_config.json
   // Max characters per WeChat message (longer messages are split)
   "max_message_length": 2000,
 
+  // Image processing settings
+  "image": {
+    "max_long_edge": 2560,     // Long-edge pixel threshold; larger images trigger compression prompt
+                                // Reference: 720p=1280, 1K=1920, 2K=2560, 2.7K=3440, 4K=3840
+    "compress_quality": 85      // JPEG compression quality (1-100)
+  },
+
   // Claude Code settings
   "claude": {
     "cwd": null,              // Working directory (null = project root)
@@ -128,6 +137,22 @@ cp weixin_lib/default_config.json weixin_config.json
   "token_file": ".weixin-token.json"
 }
 ```
+
+---
+
+## Image Understanding
+
+Users can send images to the AI for analysis:
+
+- Images are automatically downloaded from WeChat CDN and AES-128-ECB decrypted
+- Sent to Claude as base64 multimodal content for visual understanding
+- Supports image + text mixed messages (e.g. sending a photo with "what is this?")
+- High-resolution images (long edge exceeding threshold, default 2560px) trigger a compression prompt:
+  - Reply 1: Compress to threshold size then process
+  - Reply 2: Process with original image
+  - Reply 3: Cancel processing
+
+Threshold and compression quality can be adjusted in the config (`image.max_long_edge` and `image.compress_quality`).
 
 ---
 

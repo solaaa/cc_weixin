@@ -12,11 +12,15 @@ import struct
 import uuid
 import base64
 import time
+import tempfile
 import urllib.request
 import urllib.error
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.padding import PKCS7
 
 log = logging.getLogger("ilink")
 
+CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
 DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 BOT_TYPE = "3"
 CHANNEL_VERSION = "1.0.2"
@@ -223,22 +227,209 @@ class ILinkClient:
         except Exception:
             pass  # typing 失败不影响主流程
 
+    def download_image(self, image_item):
+        """
+        从 CDN 下载图片并 AES-128-ECB 解密，返回本地临时文件路径。
+
+        CDN 下载: {cdnBaseUrl}/download?encrypted_query_param={eqp}
+        AES key: image_item.aeskey (hex) 或 image_item.media.aes_key (base64)
+
+        返回 (file_path, media_type) 或 (None, None)。
+        """
+        log.debug(f"   📷 image_item: {json.dumps(image_item, ensure_ascii=False)[:300]}")
+
+        media_info = image_item.get("media") or {}
+        encrypt_query = media_info.get("encrypt_query_param") or ""
+
+        if not encrypt_query:
+            log.warning("图片消息缺少 media.encrypt_query_param，跳过下载")
+            return None, None
+
+        # 解析 AES key (两种格式)
+        aes_key = None
+        aes_key_hex = image_item.get("aeskey") or ""
+        if aes_key_hex:
+            # image_item.aeskey 是 hex 字符串，转为 bytes
+            try:
+                aes_key = bytes.fromhex(aes_key_hex)
+            except ValueError:
+                pass
+        if aes_key is None and media_info.get("aes_key"):
+            aes_key = _parse_aes_key(media_info["aes_key"])
+
+        # 构建 CDN 下载 URL
+        cdn_url = f"{CDN_BASE_URL}/download?encrypted_query_param={urllib.request.quote(encrypt_query)}"
+
+        try:
+            log.info(f"   📷 正在从 CDN 下载图片...")
+            req = urllib.request.Request(cdn_url)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw_data = resp.read()
+                content_type = resp.headers.get("Content-Type", "image/jpeg")
+
+            log.info(f"   📷 下载完成: {len(raw_data)} bytes")
+
+            if aes_key:
+                decrypted_data = _decrypt_aes_ecb(raw_data, aes_key)
+                log.info(f"   📷 AES 解密完成: {len(decrypted_data)} bytes")
+            else:
+                decrypted_data = raw_data
+
+            ext = _guess_image_ext(decrypted_data, content_type)
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=ext, prefix="wx_img_", delete=False,
+                dir=tempfile.gettempdir(),
+            )
+            tmp.write(decrypted_data)
+            tmp.close()
+
+            media_type = {
+                ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".png": "image/png", ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(ext, "image/jpeg")
+
+            log.info(f"   📷 图片已保存: {tmp.name}")
+            return tmp.name, media_type
+
+        except Exception as e:
+            log.error(f"下载图片失败: {e}", exc_info=True)
+            return None, None
+
+
+def _parse_aes_key(aes_key_b64):
+    """
+    解析 AES key (base64 编码)。
+
+    两种编码格式:
+    - base64(raw 16 bytes) → 解码后直接是 16 字节 key
+    - base64(hex string of 16 bytes) → 解码后是 32 字符 hex 串，需再次 hex 解码
+    """
+    decoded = base64.b64decode(aes_key_b64)
+    if len(decoded) == 16:
+        return decoded
+    if len(decoded) == 32:
+        try:
+            hex_str = decoded.decode("ascii")
+            if all(c in "0123456789abcdefABCDEF" for c in hex_str):
+                return bytes.fromhex(hex_str)
+        except (UnicodeDecodeError, ValueError):
+            pass
+    log.warning(f"aes_key 解析失败: 解码后 {len(decoded)} 字节")
+    return None
+
+
+def _decrypt_aes_ecb(data, key):
+    """AES-128-ECB 解密（PKCS7 填充）。"""
+    cipher = Cipher(algorithms.AES(key), modes.ECB())
+    decryptor = cipher.decryptor()
+    padded = decryptor.update(data) + decryptor.finalize()
+    # 尝试去除 PKCS7 填充
+    try:
+        unpadder = PKCS7(128).unpadder()
+        return unpadder.update(padded) + unpadder.finalize()
+    except ValueError:
+        # 某些图片可能不使用标准 PKCS7 填充
+        return padded
+
+
+def _guess_image_ext(data, content_type=""):
+    """根据文件头魔数或 Content-Type 推断扩展名。"""
+    if data[:8] == b'\x89PNG\r\n\x1a\n':
+        return ".png"
+    if data[:2] == b'\xff\xd8':
+        return ".jpg"
+    if data[:4] == b'GIF8':
+        return ".gif"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return ".webp"
+    if "png" in content_type:
+        return ".png"
+    if "gif" in content_type:
+        return ".gif"
+    if "webp" in content_type:
+        return ".webp"
+    return ".jpg"
+
 
 def extract_text(msg):
-    """从消息 item_list 提取纯文本。"""
+    """从消息 item_list 提取纯文本。图片消息也尝试提取同行文本。"""
+    texts = []
+    has_image = False
     for item in msg.get("item_list") or []:
         t = item.get("type")
         if t == 1 and item.get("text_item", {}).get("text"):
-            return item["text_item"]["text"]
-        if t == 3 and item.get("voice_item", {}).get("text"):
-            return f"[语音] {item['voice_item']['text']}"
-        if t == 2:
-            return "[图片]"
-        if t == 4:
-            return f"[文件] {item.get('file_item', {}).get('file_name', '')}"
-        if t == 5:
-            return "[视频]"
+            texts.append(item["text_item"]["text"])
+        elif t == 3 and item.get("voice_item", {}).get("text"):
+            texts.append(f"[语音] {item['voice_item']['text']}")
+        elif t == 2:
+            has_image = True
+        elif t == 4:
+            texts.append(f"[文件] {item.get('file_item', {}).get('file_name', '')}")
+        elif t == 5:
+            texts.append("[视频]")
+    if texts:
+        return "\n".join(texts)
+    if has_image:
+        return "[图片]"
     return "[空消息]"
+
+
+def extract_images(msg):
+    """从消息 item_list 提取图片项列表。返回 image_item 字段的列表。"""
+    images = []
+    for item in msg.get("item_list") or []:
+        if item.get("type") == 2:
+            # 优先取 image_item, 备选 pic_item
+            image_item = item.get("image_item") or item.get("pic_item")
+            if image_item:
+                images.append(image_item)
+    return images
+
+
+def get_image_info(file_path):
+    """
+    获取图片基本信息。返回 (width, height, file_size_bytes) 或 None。
+    """
+    try:
+        from PIL import Image
+        file_size = os.path.getsize(file_path)
+        with Image.open(file_path) as img:
+            return img.width, img.height, file_size
+    except Exception as e:
+        log.warning(f"获取图片信息失败: {e}")
+        return None
+
+
+def compress_image(file_path, max_long_edge, quality=85):
+    """
+    压缩图片：等比缩放到 max_long_edge，保存为 JPEG。
+    返回新文件路径，或失败返回 None。
+    """
+    try:
+        from PIL import Image
+        with Image.open(file_path) as img:
+            w, h = img.size
+            long_edge = max(w, h)
+            if long_edge <= max_long_edge:
+                return file_path  # 无需压缩
+
+            ratio = max_long_edge / long_edge
+            new_w = int(w * ratio)
+            new_h = int(h * ratio)
+
+            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            # 转换为 RGB（防止 RGBA 无法保存为 JPEG）
+            if resized.mode in ("RGBA", "P"):
+                resized = resized.convert("RGB")
+
+            out_path = file_path.rsplit(".", 1)[0] + "_compressed.jpg"
+            resized.save(out_path, "JPEG", quality=quality)
+            log.info(f"   📷 图片已压缩: {w}x{h} → {new_w}x{new_h}, 保存到 {out_path}")
+            return out_path
+    except Exception as e:
+        log.error(f"压缩图片失败: {e}")
+        return None
 
 
 def _render_qr(url):
