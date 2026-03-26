@@ -373,9 +373,14 @@ class WeixinClaudeBridge:
 
                 elif block_type == "tool_use" and should_forward(config, "tool_use"):
                     name = block.get("name", "?")
-                    inp = json.dumps(block.get("input", {}), ensure_ascii=False)
                     prefix = get_prefix(config, "tool_use")
-                    parts.append(f"{prefix}[{name}] {inp}")
+                    if name == "Skill":
+                        inp = block.get("input", {})
+                        skill_name = inp.get("skill", "") if isinstance(inp, dict) else ""
+                        suffix = f" - {skill_name}" if skill_name else ""
+                        parts.append(f"{prefix}[Skill]{suffix}")
+                    else:
+                        parts.append(f"{prefix}{name}")
 
             return "\n".join(parts) if parts else None
 
