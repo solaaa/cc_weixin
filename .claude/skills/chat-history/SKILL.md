@@ -1,6 +1,6 @@
 ---
 name: chat-history
-description: Search and retrieve past conversation history with the user. Use this skill whenever the user mentions something discussed previously, asks about past conversations, references earlier requests, wants to recall information from a previous chat, or when you need historical context to answer accurately. Also use this skill when you need to create daily summaries of conversations. Even if the user doesn't explicitly say "search history", trigger this skill when they use phrases like "之前聊过", "上次说的", "我之前让你", "记得吗", "以前提到过" or similar references to past interactions.
+description: Search and retrieve past conversation history with the user. Use this skill whenever the user mentions something discussed previously, asks about past conversations, references earlier requests, wants to recall information from a previous chat, or when you need historical context to answer accurately. Also use this skill when you need to create daily summaries of conversations. Even if the user doesn't explicitly say "search history", trigger this skill when they use phrases like "之前聊过", "上次说的", "我之前让你", "记得吗", "以前提到过" or similar references to past interactions. This skill is also triggered by the /记忆 or /memo command — when the message starts with "[记忆模式]", you MUST use this skill to search history before responding.
 ---
 
 # Chat History Search
@@ -13,6 +13,7 @@ This project maintains a SQLite-based conversation history that stores all meani
 - User asks you to recall something ("记得吗", "你还记得吗")
 - You need historical context to give an accurate answer
 - You need to create a daily summary of conversations
+- **Message starts with "[记忆模式]"** — this is a forced trigger via /记忆 or /memo command, you MUST search history first
 
 ## Two-Level Retrieval Process
 

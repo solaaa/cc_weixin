@@ -96,6 +96,10 @@ _BUILTIN_COMMANDS = {
                        "prompt": "请查看当前分支的 PR 评论并逐一处理。"},
     "memory":         {"type": "prompt",      "desc": "查看/编辑 CLAUDE.md",
                        "prompt": "请显示当前项目的 CLAUDE.md 文件内容。如果不存在，请告知。"},
+    "记忆":            {"type": "prompt",      "desc": "结合历史记忆回答",
+                       "prompt": "[记忆模式] 请先使用 chat-history skill 搜索与以下内容相关的历史对话，将检索到的历史作为参考上下文，再根据需要使用其他工具, 来完整处理用户的请求。\n\n用户消息：{args}"},
+    "memo":            {"type": "prompt",      "desc": "结合历史记忆回答（同 /记忆）",
+                       "prompt": "[记忆模式] 请先使用 chat-history skill 搜索与以下内容相关的历史对话，将检索到的历史作为参考上下文，再根据需要使用其他工具, 来完整处理用户的请求。\n\n用户消息：{args}"},
     # 不支持
     "doctor":         {"type": "unsupported", "desc": "环境诊断"},
     "login":          {"type": "unsupported", "desc": "账户登录"},
@@ -267,7 +271,11 @@ class ClaudeChat:
                         yield from self._handle_local_command(cmd, args)
                         return
                     elif spec["type"] == "prompt":
-                        message = spec["prompt"] + (f"\n补充说明: {args}" if args else "")
+                        prompt = spec["prompt"]
+                        if "{args}" in prompt and args:
+                            message = prompt.replace("{args}", args)
+                        else:
+                            message = prompt + (f"\n补充说明: {args}" if args else "")
                     elif spec["type"] == "unsupported":
                         yield self._make_result(f"/{cmd} 在 stream-json 模式下不可用")
                         return
