@@ -57,9 +57,7 @@ cc_weixin/
 ├── run_weixin.py              # 主入口：微信桥接服务
 ├── run_chat.py                # 辅助入口：纯终端对话（调试用）
 ├── start.bat                  # Windows 一键启动脚本
-├── wechat-claude-bridge.mjs   # Node.js 版本 demo（早期/备选）
 ├── CLAUDE.md                  # Claude Code 的系统指令文件
-├── CODE_SYS_PROMPT.md         # 代码编写的系统提示规则
 │
 ├── CC_lib/                    # Claude Code CLI 封装层
 │   ├── claude_cli.py          # 核心：持久化进程管理 + stream-json 协议
@@ -762,10 +760,7 @@ python run_chat.py                    # 交互式终端
 python run_chat.py "帮我写快速排序"    # 单次询问
 ```
 
-### 15.2 `wechat-claude-bridge.mjs`
 
-Node.js 版本 demo，基于 `@anthropic-ai/claude-agent-sdk`。是早期/备选实现，功能不如 Python 版完整。
-
-### 15.3 `start.bat`
+### 15.2 `start.bat`
 
 Windows 一键启动脚本：切换到项目目录 → 运行 `python run_weixin.py`。
