@@ -100,6 +100,19 @@ _BUILTIN_COMMANDS = {
                        "prompt": "[记忆模式] 请先使用 chat-history skill 搜索与以下内容相关的历史对话，将检索到的历史作为参考上下文，再根据需要使用其他工具, 来完整处理用户的请求。\n\n用户消息：{args}"},
     "memo":            {"type": "prompt",      "desc": "结合历史记忆回答（同 /记忆）",
                        "prompt": "[记忆模式] 请先使用 chat-history skill 搜索与以下内容相关的历史对话，将检索到的历史作为参考上下文，再根据需要使用其他工具, 来完整处理用户的请求。\n\n用户消息：{args}"},
+    "打卡":            {"type": "prompt",      "desc": "记录上班打卡并设置下班提醒",
+                       "prompt": """用户在 {datetime} 发送了打卡指令，请按以下规则处理：
+
+1. 将 {datetime} 作为上班打卡时间
+2. 计算下班时间 = 上班时间 + 9.5小时
+3. 如果计算出的下班时间超过 18:30（即用户迟到了，早上9点以后才到），则下班时间按 18:30 计算
+4. 设置下班打卡提醒：提醒时间 = 下班时间 - 10分钟
+5. 使用 weixin_lib/schedule_cli.py 设置提醒，提醒内容格式：
+   【下班打卡提醒】您今天HH:MM上班，请在HH:MM前完成下班打卡
+   （其中第一个HH:MM是上班时间，第二个HH:MM是下班时间）
+6. 回复用户确认信息，包含：上班时间、下班时间、提醒时间
+
+注意：使用 python weixin_lib/schedule_cli.py add --time "HH:MM" --message "提醒内容" 来设置提醒。"""},
     # 不支持
     "doctor":         {"type": "unsupported", "desc": "环境诊断"},
     "login":          {"type": "unsupported", "desc": "账户登录"},
@@ -272,6 +285,9 @@ class ClaudeChat:
                         return
                     elif spec["type"] == "prompt":
                         prompt = spec["prompt"]
+                        if "{datetime}" in prompt:
+                            from datetime import datetime as _dt
+                            prompt = prompt.replace("{datetime}", _dt.now().strftime("%Y-%m-%d %H:%M"))
                         if "{args}" in prompt and args:
                             message = prompt.replace("{args}", args)
                         else:
